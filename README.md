@@ -29,7 +29,7 @@ Please find the modified models for tasks of the assignment at '/models' directo
 To evaluate the results, please download the related checkpoint file from the link below and place it in the root directory of the project.
 
 To eval the results, please use the command below:
-```python test.py --task <GRU/LSTM/bi-LSTM/Attention/Transformer> --eval --ckpt <checkpoint_path>```
+```python test.py --task <GRU/LSTM/bi-LSTM/Attention/Transformer> --eval --encoder_ckpt <encoder_checkpoint_path> --decoder_ckpt <decoder_checkpoint_path>```
 
 ## Reproduction of Training
 To reproduce the results, please use the commands below:

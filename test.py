@@ -623,7 +623,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_epochs', type=int, default=20, help='epochs to train for')
     parser.add_argument('--gpu', type=str, default=0, help='device to use')
     parser.add_argument('--eval', action='store_true', help='eval mode')
-    parser.add_argument('--ckpt', type=str, default='', help='the path to the checkpoint to load')
+    parser.add_argument('--encoder_ckpt', type=str, default='', help='the path to the encoder checkpoint to load')
+    parser.add_argument('--decoder_ckpt', type=str, default='', help='the path to the decoder checkpoint to load')
 
     args = parser.parse_args()
 
@@ -675,8 +676,8 @@ if __name__ == '__main__':
 
         trainIters(args.task, encoder1, decoder1, args.n_epochs, print_every=5000, device=device)
         # Save the model
-        torch.save(encoder1.state_dict(), f'encoder-{args.task}-e{args.n_epochs}.pt')
-        torch.save(decoder1.state_dict(), f'encoder-{args.task}-e{args.n_epochs}.pt')
+        torch.save(encoder1.state_dict(), f'./ckpt/encoder-{args.task}-e{args.n_epochs}.pt')
+        torch.save(decoder1.state_dict(), f'./ckpt/decoder-{args.task}-e{args.n_epochs}.pt')
 
         evaluateRandomly(args.task, encoder1, decoder1)
 
