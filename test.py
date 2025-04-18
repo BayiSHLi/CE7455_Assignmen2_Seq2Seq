@@ -201,9 +201,9 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 
     return loss.item() / target_length
 
-def evaluate(encoder, decoder, sentence, max_length=MAX_LENGTH):
+def evaluate(encoder, decoder, sentence, device, max_length=MAX_LENGTH):
     with torch.no_grad():
-        input_tensor = tensorFromSentence(input_lang, sentence)
+        input_tensor = tensorFromSentence(input_lang, sentence, device)
         input_length = input_tensor.size()[0]
         encoder_hidden = encoder.initHidden()
 
@@ -286,9 +286,9 @@ def train_biLSTM(input_tensor, target_tensor, encoder, decoder, encoder_optimize
     return loss.item() / target_length
 
 # Modified evaluation function for bi-LSTM
-def evaluate_biLSTM(encoder, decoder, sentence, max_length=MAX_LENGTH):
+def evaluate_biLSTM(encoder, decoder, sentence, device, max_length=MAX_LENGTH):
     with torch.no_grad():
-        input_tensor = tensorFromSentence(input_lang, sentence)
+        input_tensor = tensorFromSentence(input_lang, sentence, device)
         input_length = input_tensor.size()[0]
         encoder_hidden = encoder.initHidden()
 
@@ -322,7 +322,6 @@ def evaluate_biLSTM(encoder, decoder, sentence, max_length=MAX_LENGTH):
         return decoded_words
 
 # Modified train function for Attention
-
 def train_Attention(input_tensor, target_tensor, encoder, decoder,
           encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
     encoder_hidden = encoder.initHidden()
@@ -373,8 +372,42 @@ def train_Attention(input_tensor, target_tensor, encoder, decoder,
     return loss.item() / target_length
 
 
+def evaluate_Attention(encoder, decoder, sentence, device, max_length=MAX_LENGTH):
+    with torch.no_grad():
+        input_tensor = tensorFromSentence(input_lang, sentence, device)
+        input_length = input_tensor.size()[0]
+        encoder_hidden = encoder.initHidden()
+
+        encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
+
+        for ei in range(input_length):
+            encoder_output, encoder_hidden = encoder(input_tensor[ei],
+                                                     encoder_hidden)
+            encoder_outputs[ei] += encoder_output[0, 0]
+
+        decoder_input = torch.tensor([[SOS_token]], device=device)  # SOS
+
+        decoder_hidden = encoder_hidden
+
+        decoded_words = []
+
+        for di in range(max_length):
+            decoder_output, decoder_hidden, decoder_attention = decoder(
+                decoder_input, decoder_hidden, encoder_outputs)
+            topv, topi = decoder_output.data.topk(1)
+            if topi.item() == EOS_token:
+                decoded_words.append('<EOS>')
+                break
+            else:
+                decoded_words.append(output_lang.index2word[topi.item()])
+
+            decoder_input = topi.squeeze().detach()
+
+        return decoded_words
+
+# Modified training function for Transformer
 def train_transformer(input_tensor, target_tensor, encoder, decoder,
-          encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
+                      encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
     encoder_hidden = encoder.initHidden()
 
     encoder_optimizer.zero_grad()
@@ -383,17 +416,12 @@ def train_transformer(input_tensor, target_tensor, encoder, decoder,
     input_length = input_tensor.size(0)
     target_length = target_tensor.size(0)
 
-    # Store all encoder outputs
     encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
 
     loss = 0
 
-    # Transformer encoder processes entire sequence at once
-    # We need to pass the whole input sequence
-    encoder_output, encoder_hidden = encoder(input_tensor.unsqueeze(1), encoder_hidden)
-
-    # For compatibility with existing code, we'll fill encoder_outputs
-    # with the same output (since transformer processes all at once)
+    # Input needs to be (seq_len, 1)
+    encoder_output, encoder_hidden = encoder(input_tensor, encoder_hidden)
     for ei in range(input_length):
         encoder_outputs[ei] = encoder_output[0, 0]
 
@@ -407,13 +435,13 @@ def train_transformer(input_tensor, target_tensor, encoder, decoder,
 
     if use_teacher_forcing:
         for di in range(target_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
+            decoder_output, decoder_hidden = decoder(
                 decoder_input, decoder_hidden, encoder_outputs)
             loss += criterion(decoder_output, target_tensor[di])
             decoder_input = target_tensor[di]  # Teacher forcing
     else:
         for di in range(target_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
+            decoder_output, decoder_hidden = decoder(
                 decoder_input, decoder_hidden, encoder_outputs)
             topv, topi = decoder_output.topk(1)
             decoder_input = topi.squeeze().detach()
@@ -427,6 +455,42 @@ def train_transformer(input_tensor, target_tensor, encoder, decoder,
     decoder_optimizer.step()
 
     return loss.item() / target_length
+
+
+# Modified evaluation function for Transformer
+def evaluate_Transformer(encoder, decoder, sentence, device, max_length=MAX_LENGTH):
+    with torch.no_grad():
+        input_tensor = tensorFromSentence(input_lang, sentence, device)
+        input_length = input_tensor.size()[0]
+
+        # Transformer processes entire sequence at once
+        encoder_output, encoder_hidden = encoder(input_tensor, None)
+
+        # Create encoder outputs for attention (if used)
+        encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
+        for ei in range(min(input_length, max_length)):
+            encoder_outputs[ei] = encoder_output[0, 0]
+
+        decoder_input = torch.tensor([[SOS_token]], device=device)
+        decoder_hidden = encoder_hidden
+
+        decoded_words = []
+        decoder_attentions = torch.zeros(max_length, max_length)
+
+        for di in range(max_length):
+            decoder_output, decoder_hidden = decoder(
+                decoder_input, decoder_hidden, None)
+
+            topv, topi = decoder_output.data.topk(1)
+            if topi.item() == EOS_token:
+                decoded_words.append('<EOS>')
+                break
+            else:
+                decoded_words.append(output_lang.index2word[topi.item()])
+
+            decoder_input = topi.squeeze().detach()
+
+        return decoded_words
 
 
 def trainIters(task, encoder, decoder, epochs, device, print_every=1000, plot_every=100, learning_rate=0.01, ):
@@ -447,7 +511,6 @@ def trainIters(task, encoder, decoder, epochs, device, print_every=1000, plot_ev
         print("Epoch: %d/%d" % (epoch, epochs))
         for training_pair in train_pairs:
             training_pair = tensorsFromPair(training_pair, device=device)
-
             input_tensor = training_pair[0]
             target_tensor = training_pair[1]
 
@@ -491,14 +554,17 @@ def evaluateRandomly(task, encoder, decoder, n=10):
         print('>', pair[0])
         print('=', pair[1])
 
-        if task in ['GRU','LSTM','Attention']:
-            output_words = evaluate(encoder, decoder, pair[0])
+        if task in ['GRU','LSTM']:
+            output_words = evaluate(encoder, decoder, pair[0], device)
+
+        elif task == 'Attention':
+            output_words = evaluate_Attention(encoder, decoder, pair[0], device)
 
         elif task == 'bi-LSTM':
-            output_words = evaluate_biLSTM(encoder, decoder, pair[0])
+            output_words = evaluate_biLSTM(encoder, decoder, pair[0], device)
 
         elif task == 'Transformer':
-            pass
+            output_words = evaluate_Transformer(encoder, decoder, pair[0], device)
 
         else:
             raise ValueError("Invalid task. Please choose from: GRU, LSTM, bi-LSTM, Attention, Transformer")
@@ -515,14 +581,15 @@ def inference(task, encoder, decoder, testing_pairs):
     from tqdm import tqdm
     for i in tqdm(range(len(testing_pairs))):
         pair = testing_pairs[i]
-        if task in ['GRU','LSTM','Attention']:
-            output_words = evaluate(encoder, decoder, pair[0])
-
+        if task in ['GRU','LSTM']:
+            output_words = evaluate(encoder, decoder, pair[0], device)
+        elif task == 'Attention':
+            output_words = evaluate_Attention(encoder, decoder, pair[0], device)
         elif task == 'bi-LSTM':
-            output_words = evaluate_biLSTM(encoder, decoder, pair[0])
+            output_words = evaluate_biLSTM(encoder, decoder, pair[0], device)
 
         elif task == 'Transformer':
-            pass
+            output_words = evaluate_Transformer(encoder, decoder, pair[0], device)
 
         else:
             raise ValueError("Invalid task. Please choose from: GRU, LSTM, bi-LSTM, Attention, Transformer")
@@ -553,9 +620,9 @@ def eval(gt, predict):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Seq2Seq with GRU')
     parser.add_argument('--task', type=str, help='Task to run: GRU, LSTM, bi-LSTM, Attention, Transformer')
-    parser.add_argument('--n_epochs', type=int, default=5, help='epochs to train for')
+    parser.add_argument('--n_epochs', type=int, default=20, help='epochs to train for')
     parser.add_argument('--gpu', type=str, default=0, help='device to use')
-    parser.add_argument('--eval', type=str, action='store_true', help='eval mode')
+    parser.add_argument('--eval', action='store_true', help='eval mode')
     parser.add_argument('--ckpt', type=str, default='', help='the path to the checkpoint to load')
 
     args = parser.parse_args()
@@ -595,8 +662,8 @@ if __name__ == '__main__':
         decoder1 = AttnDecoderGRU(hidden_size, output_lang.n_words, device, ).to(device)
 
     elif args.task == 'Transformer':
-        pass
-
+        encoder1 = TransformerEncoder(input_lang.n_words, hidden_size, device).to(device)
+        decoder1 = TransformerDecoder(hidden_size, output_lang.n_words, device, ).to(device)
     else:
         raise ValueError("Invalid task. Please choose from: GRU, LSTM, bi-LSTM, Attention, Transformer")
 
@@ -607,13 +674,15 @@ if __name__ == '__main__':
                    reinit=True)
 
         trainIters(args.task, encoder1, decoder1, args.n_epochs, print_every=5000, device=device)
+        # Save the model
+        torch.save(encoder1.state_dict(), f'encoder-{args.task}-e{args.n_epochs}.pt')
+        torch.save(decoder1.state_dict(), f'encoder-{args.task}-e{args.n_epochs}.pt')
+
         evaluateRandomly(args.task, encoder1, decoder1)
 
         input, gt, predict = inference(args.task, encoder1, decoder1, test_pairs)
         eval(gt, predict)
 
-        torch.save(encoder1.state_dict(), f'encoder-{args.task}-e{args.epochs}.pt')
-        torch.save(decoder1.state_dict(), f'encoder-{args.task}-e{args.epochs}.pt')
 
     else:
         encoder1.load_state_dict(torch.load(args.ckpt))
