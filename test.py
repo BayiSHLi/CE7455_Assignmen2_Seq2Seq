@@ -555,10 +555,10 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, help='Task to run: GRU, LSTM, bi-LSTM, Attention, Transformer')
     parser.add_argument('--n_epochs', type=int, default=5, help='epochs to train for')
     parser.add_argument('--gpu', type=str, default=0, help='device to use')
+    parser.add_argument('--eval', type=str, action='store_true', help='eval mode')
+    parser.add_argument('--ckpt', type=str, default='', help='the path to the checkpoint to load')
+
     args = parser.parse_args()
-    wandb.init(project='Assignment 2',
-               name=args.task,
-               reinit=True)
 
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
 
@@ -575,7 +575,7 @@ if __name__ == '__main__':
     hidden_size = 256
 
     if args.task == 'GRU':
-        #Task 2 Example GRU
+        # Task 2 Example GRU
         encoder1 = EncoderRNN(input_lang.n_words, hidden_size, device).to(device)
         decoder1 = Decoder(hidden_size, output_lang.n_words, device).to(device)
 
@@ -601,14 +601,29 @@ if __name__ == '__main__':
         raise ValueError("Invalid task. Please choose from: GRU, LSTM, bi-LSTM, Attention, Transformer")
 
 
-    trainIters(args.task, encoder1, decoder1, args.n_epochs, print_every=5000, device=device)
-    evaluateRandomly(args.task, encoder1, decoder1)
+    if not args.eval:
+        wandb.init(project='Assignment 2',
+                   name=args.task,
+                   reinit=True)
 
-    input, gt, predict = inference(args.task, encoder1, decoder1, test_pairs)
-    eval(gt, predict)
+        trainIters(args.task, encoder1, decoder1, args.n_epochs, print_every=5000, device=device)
+        evaluateRandomly(args.task, encoder1, decoder1)
 
-    torch.save(encoder1.state_dict(), f'encoder-{args.task}-e{args.epochs}.pt')
-    torch.save(decoder1.state_dict(), f'encoder-{args.task}-e{args.epochs}.pt')
+        input, gt, predict = inference(args.task, encoder1, decoder1, test_pairs)
+        eval(gt, predict)
+
+        torch.save(encoder1.state_dict(), f'encoder-{args.task}-e{args.epochs}.pt')
+        torch.save(decoder1.state_dict(), f'encoder-{args.task}-e{args.epochs}.pt')
+
+    else:
+        encoder1.load_state_dict(torch.load(args.ckpt))
+        decoder1.load_state_dict(torch.load(args.ckpt))
+
+        print("=== Evaluation ===")
+        evaluateRandomly(args.task, encoder1, decoder1)
+        input, gt, predict = inference(args.task, encoder1, decoder1, test_pairs)
+        eval(gt, predict)
+
 
 
 
